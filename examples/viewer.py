@@ -10,6 +10,7 @@ import sys
 import time
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import quaternion
 
 flags = sys.getdlopenflags()
 sys.setdlopenflags(flags | ctypes.RTLD_GLOBAL)
@@ -193,6 +194,8 @@ class HabitatSimInteractiveViewer(Application):
         LoggingContext.reinitialize_from_env()
         logger.setLevel("INFO")
         self.print_help_text()
+
+        self.cam_poses = []
 
     def draw_contact_debug(self):
         """
@@ -443,6 +446,24 @@ class HabitatSimInteractiveViewer(Application):
 
         for _ in range(int(repetitions)):
             [agent.act(x) for x in action_queue]
+        
+
+        curr_position = agent.state.position
+        curr_rotation = quaternion.as_float_array(agent.state.sensor_states['color_sensor'].rotation)
+        if not hasattr(self, "last_position"):
+            self.last_position = curr_position
+            self.last_rotation = curr_rotation
+        
+        if np.all(curr_position==self.last_position) and np.all(curr_rotation==self.last_rotation):
+            pass
+        else:
+            print(f"Step: {len(self.cam_poses)}", agent.state.sensor_states['color_sensor'].position)
+            self.cam_poses.append({
+                "color_sensor": {"position": agent.state.sensor_states['color_sensor'].position.tolist(), "rotation":quaternion.as_float_array(agent.state.sensor_states['color_sensor'].rotation).tolist()},
+                "agent_pose": {"position": agent.state.position.tolist(), "rotation": quaternion.as_float_array(agent.state.rotation).tolist()}
+            })
+            self.last_position = curr_position
+            self.last_rotation = curr_rotation
 
         # update the grabber transform when our agent is moved
         if self.mouse_grabber is not None:
@@ -473,6 +494,12 @@ class HabitatSimInteractiveViewer(Application):
 
         if key == pressed.ESC:
             event.accepted = True
+            import jsonlines
+            scene_id = self.sim.config.sim_cfg.scene_id.split("/")[-1]
+            os.makedirs('./outputs', exist_ok=True)
+            with jsonlines.open(f'outputs/cam_poses_{scene_id}.jsonl', mode='w') as writer:
+                writer.write_all(self.cam_poses)
+            
             self.exit_event(Application.ExitEvent)
             return
 
